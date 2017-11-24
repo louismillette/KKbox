@@ -3,6 +3,7 @@ import os
 import time
 import json
 
+
 # Row class is the object of each row
 class Row():
     def __init__(self,id=None, msno=None, city=None, bd=None, gender=None, registered_via=None, registration_init_time=None,
