@@ -1,1 +1,1 @@
-{"5": "album", "6": "song-based-playlist", "4": "top-hits-for-artist", "2": "local-playlist", "8": "song", "1": "online-playlist", "9": "listen-with", "12": "my-daily-playlist", "3": "local-library", "10": "artist", "7": "radio", "11": "topic-article-playlist"}
+{"1": "online-playlist", "2": "local-playlist", "3": "local-library", "4": "top-hits-for-artist", "5": "album", "6": "song-based-playlist", "7": "radio", "8": "song", "9": "listen-with", "10": "artist", "11": "topic-article-playlist", "12": "my-daily-playlist"}

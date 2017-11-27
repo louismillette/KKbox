@@ -2,6 +2,10 @@ import sqlite3
 import os
 import time
 import json
+import random
+import numpy as np
+from sklearn.decomposition import TruncatedSVD
+from sklearn.preprocessing import StandardScaler
 
 
 # Row class is the object of each row
@@ -136,6 +140,13 @@ class Row():
         if self.conn:
             self.conn.close()
         return self
+
+    # returns 2 values: list of all values in order except target, and the target ( as a list of size 1)
+    def tolist(self):
+        vals = [self.id, self.msno, self.city, self.bd, self.gender, self.registered_via, self.registration_init_time,
+             self.expiration_date, self.song_id, self.song_length, self.genre_ids,self.artist_name,self.composer,
+             self.lyricist, self.language, self.source_system_tab, self.source_type, self.source_screen_name, self.name, self.isrc]
+        return vals, self.target
 
     # set the variables of this current Row
     def set(self,city=None, bd=None, gender=None, registered_via=None, registration_init_time=None,
@@ -444,7 +455,6 @@ class Rows():
     def saveall(self, rows):
         print('[+] Beggining saveall data dump')
         start = time.time()
-        data = []
         index = 0
         if not (self.c):
             self.__openDB()
@@ -476,29 +486,154 @@ class Rows():
         end = time.time()
         print('[+] executed data dump of length {:,} in {} seconds'.format(index, end-start))
 
+    # saves all the rows to a new CSV file.
+    # takes generator of rows (rows argument), and proportion of rows to use (proportion)
+    def saveallCSV(self, rows, proportion=1, filename='prows.csv'):
+        print('[+] Beggining saveall data dump')
+        file_path = os.path.join(self.script_dir, filename)
+        pnum = int(101 * proportion)
+        start = time.time()
+        index = 0
+        s_old = time.time()
+        with open(file_path,'w') as file:
+            file.write(('id, msno, city, bd, gender, registered_via, registration_init_time,'
+                 'expiration_date, song_id, song_length, genre_ids,artist_name,composer,'
+                 'lyricist, language, source_system_tab, source_type, target, source_screen_name,'
+                 'name, isrc\n'))
+            for row in rows:
+                rnum = random.randint(a=0, b=100)
+                index += 1
+                if index % 100000 == 0:
+                    s_new = time.time()
+                    print('[+] Handled {} values at {} seconds/row'.format(index, (s_new-s_old)/100000))
+                    s_old=s_new
+                if rnum > pnum:
+                    continue
+                if not row._link_id == -1:
+                    raise Exception('[+] Cannot save already linked row.  Perhaps try the update method')
+                if not row.id:
+                    raise Exception('[+] Row must have an ID to save')
+                if not row.msno:
+                    raise Exception('[+] Row has no MSNO, somewhere back this row has been invalidated')
+                vals = [row.id, row.msno, row.city, row.bd, row.gender, row.registered_via, row.registration_init_time,
+                     row.expiration_date, row.song_id, row.song_length, row.genre_ids,row.artist_name,row.composer,
+                     row.lyricist, row.language, row.source_system_tab, row.source_type, row.target, row.source_screen_name,
+                     row.name, row.isrc]
+                valsStr = [str(ele) for ele in vals]
+                file.write(','.join(valsStr) + '\n')
+        end = time.time()
+        print('[+] executed data dump of length {:,} in {} seconds'.format(index, end-start))
+
+    # loads all rows from DB into a generator
+    def loadAll(self):
+        if not (self.c):
+            self.__openDB()
+        rows = self.c.execute('SELECT * FROM Train')
+        for row in rows:
+            args = ['id', 'msno', 'city', 'bd', 'gender', 'registered_via', 'registration_init_time',
+         'expiration_date', 'song_id', 'song_length', 'genre_ids', 'artist_name', 'composer',
+         'lyricist', 'language', 'source_system_tab', 'source_type', 'target', 'source_screen_name',
+         'name', 'isrc']
+            yield Row(**dict(list(zip(args, row))))
+
+    # moves all the rows into memory and returns an numpy matrix of the X data, and np matrix of the target
+    # takes generator of rows (rows argument)
+    # returns np array X and np array y (X all data, order maintained except tagret, and target y)
+    def tonp(self, rows):
+        X_lst = []
+        y_lst = []
+        index = 0
+        t_start = time.time()
+        t_start_abs = time.time()
+        for row in rows:
+            index += 1
+            x,y = row.tolist()
+            X_lst.append(x)
+            y_lst.append(y)
+            if index % 100000 == 0:
+                print('[+] finished importing {} rows into memory, in {} seconds per row'.format(index, 100000/(time.time()-t_start)))
+                t_start = time.time()
+        t_end_abs = time.time()
+        print('[+] loaded {} rows into memory in {} seconds'.format(index, 100000/(t_end_abs-t_start_abs)))
+        return np.array(X_lst), np.array(y_lst)
+
+    # takes numpy array X and returns a dimensionality reduced array
+    def toPCA(self, X, ncomponents=5):
+        svd = TruncatedSVD(n_components=ncomponents)
+        X_fit = svd.fit_transform(X)
+        return X_fit
+
+    # takes numpy objects X and y and writes to a CSV file
+    # takes X, np of d factors with n rows, and y target values (length n)
+    # names factors based on length (not origonal id,msno,city,... labels)
+    def toCSV(self, X,y, proportion=1.0, filename='pca_data.csv'):
+        X_lst = X.tolist()
+        y_lst = y.tolist()
+        x_ex = X_lst[0]
+        leng = len(x_ex)
+        factor_names = ['f' + ele for ele in range(leng)].append('target')
+        print('[+] Beggining saveall data dump')
+        file_path = os.path.join(self.script_dir, filename)
+        pnum = int(101 * proportion)
+        start = time.time()
+        s_old = time.time()
+        i_index = 0
+        with open(file_path, 'w') as file:
+            file.write(','.join(factor_names) + '\n')
+            for index in range(len(X_lst)):
+                rnum = random.randint(a=0, b=100)
+                if index % 100000 == 0:
+                    s_new = time.time()
+                    print('[+] Handled {} values at {} seconds/row'.format(index, (s_new - s_old) / 100000))
+                    s_old = s_new
+                if rnum > pnum:
+                    continue
+                row_x = X_lst[index]
+                row_y = y_lst[index]
+                row = [str(ele) for ele in row_x.append(row_y)]
+                file.write(','.join(row) + '\n')
+                i_index = index
+        end = time.time()
+        print('[+] executed data dump of length {:,} in {} seconds'.format(i_index, end - start))
+
+
+        for index in range(len(X_lst)):
+            row_x = X_lst[index]
+            row_y = y_lst[index]
+            row = row_x.append(row_y)
+            yield Row(**dict(list(zip(factor_names, row))))
+
 if __name__ == '__main__':
-    print('begin')
-    begin = time.time()
-    M = Rows()
-    M.initalize()
-    g1 = M.loadFromCsv()
-    g2 = M.songs(g1)
-    g3 = M.songs_extra(g2)
-    g4 = M.members(g3)
-    g5 = M.fixNulls(g4)
-    g6 = M.catagoricalize(g5,'source_system_tab')
-    g7 = M.catagoricalize(g6, 'source_screen_name')
-    g8 = M.catagoricalize(g7, 'source_type')
-    g9 = M.catagoricalize(g8, 'name')
-    g10 = M.catagoricalize(g9, 'isrc')
-    g11 = M.catagoricalize(g10, 'lyricist', splitchar='|')
-    g12 = M.catagoricalize(g11, 'composer', splitchar='|')
-    g13 = M.catagoricalize(g12, 'artist_name', splitchar='|')
-    g14 = M.catagoricalize(g13, 'gender')
-    M.saveall(g14)
-    thend = time.time()
-    print("completed full pre-processing in {} seconds".format(thend-begin))
+    # This is for the inital Db creation and catagoricalization of the data
+    # print('begin')
+    # begin = time.time()
+    # M = Rows()
+    # M.initalize()
+    # g1 = M.loadFromCsv()
+    # g2 = M.songs(g1)
+    # g3 = M.songs_extra(g2)
+    # g4 = M.members(g3)
+    # g5 = M.fixNulls(g4)
+    # g6 = M.catagoricalize(g5,'source_system_tab')
+    # g7 = M.catagoricalize(g6, 'source_screen_name')
+    # g8 = M.catagoricalize(g7, 'source_type')
+    # g9 = M.catagoricalize(g8, 'name')
+    # g10 = M.catagoricalize(g9, 'isrc')
+    # g11 = M.catagoricalize(g10, 'lyricist', splitchar='|')
+    # g12 = M.catagoricalize(g11, 'composer', splitchar='|')
+    # g13 = M.catagoricalize(g12, 'artist_name', splitchar='|')
+    # g14 = M.catagoricalize(g13, 'gender')
+    # M.saveallCSV(g14,proportion=.01)
+    # thend = time.time()
+    # print("completed full pre-processing in {} seconds".format(thend-begin))
 
-
-    # r = Rows()
-    # print(len(list(r.load(song_id='BBzumQNXUHKdEBOB7mAJuzok+IJA1c2Ryg/yzTF6tik='))))
+    # this is for reducing dimentionality (PCA) and normalizing the data into a CSV file
+    r = Rows()
+    print('beggining load')
+    g1 = r.loadAll()
+    print('Loaded Data')
+    X,y = r.tonp(g1)
+    print('Generated Numpy Arrays')
+    X = r.toPCA(X)
+    print('PCA generated')
+    g2 = r.toCSV(X,y,proportion=.01)
